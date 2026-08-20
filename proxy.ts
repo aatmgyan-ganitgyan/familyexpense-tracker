@@ -8,58 +8,62 @@ export async function proxy(request: NextRequest) {
     },
   })
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 
-  if (!supabaseUrl || !supabaseKey) {
-    console.warn('Missing Supabase environment variables in Proxy. Bypassing.')
-    return response
-  }
-
-  const supabase = createServerClient(
-    supabaseUrl,
-    supabaseKey,
-    {
-      cookies: {
-        get(name: string) {
-          return request.cookies.get(name)?.value
-        },
-        set(name: string, value: string, options: CookieOptions) {
-          request.cookies.set({ name, value, ...options })
-          response = NextResponse.next({
-            request: { headers: request.headers },
-          })
-          response.cookies.set({ name, value, ...options })
-        },
-        remove(name: string, options: CookieOptions) {
-          request.cookies.set({ name, value: '', ...options })
-          response = NextResponse.next({
-            request: { headers: request.headers },
-          })
-          response.cookies.set({ name, value: '', ...options })
-        },
-      },
+    if (!supabaseUrl || !supabaseKey) {
+      console.warn('Missing Supabase environment variables in Proxy. Bypassing.')
+      return response
     }
-  )
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+    const supabase = createServerClient(
+      supabaseUrl,
+      supabaseKey,
+      {
+        cookies: {
+          get(name: string) {
+            return request.cookies.get(name)?.value
+          },
+          set(name: string, value: string, options: CookieOptions) {
+            request.cookies.set({ name, value, ...options })
+            response = NextResponse.next({
+              request: { headers: request.headers },
+            })
+            response.cookies.set({ name, value, ...options })
+          },
+          remove(name: string, options: CookieOptions) {
+            request.cookies.set({ name, value: '', ...options })
+            response = NextResponse.next({
+              request: { headers: request.headers },
+            })
+            response.cookies.set({ name, value: '', ...options })
+          },
+        },
+      }
+    )
 
-  const pathname = request.nextUrl.pathname
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
 
-  // 1. If not authenticated and not on login page, redirect to /login
-  if (!user && pathname !== '/login') {
-    const url = request.nextUrl.clone()
-    url.pathname = '/login'
-    return NextResponse.redirect(url)
-  }
+    const pathname = request.nextUrl.pathname
 
-  // 2. If authenticated and on login page, redirect to home /
-  if (user && pathname === '/login') {
-    const url = request.nextUrl.clone()
-    url.pathname = '/'
-    return NextResponse.redirect(url)
+    // 1. If not authenticated and not on login page, redirect to /login
+    if (!user && pathname !== '/login') {
+      const url = request.nextUrl.clone()
+      url.pathname = '/login'
+      return NextResponse.redirect(url)
+    }
+
+    // 2. If authenticated and on login page, redirect to home /
+    if (user && pathname === '/login') {
+      const url = request.nextUrl.clone()
+      url.pathname = '/'
+      return NextResponse.redirect(url)
+    }
+  } catch (error) {
+    console.error('Error in Proxy middleware:', error)
   }
 
   return response
