@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import Dashboard from './dashboard'
+import Dashboard from './(dashboard)/dashboard'
 import { getISTDateString } from '@/lib/date'
 
 export default async function HomePage() {
