@@ -57,6 +57,16 @@ function LoginForm() {
     return rawError
   }
 
+  const getSiteOrigin = () => {
+    if (typeof window !== 'undefined' && window.location.origin) {
+      return window.location.origin
+    }
+    if (process.env.NEXT_PUBLIC_SITE_URL) {
+      return process.env.NEXT_PUBLIC_SITE_URL
+    }
+    return 'https://familyexpense-tracker.vercel.app'
+  }
+
   const handleResendConfirmation = async (targetEmail?: string) => {
     const emailToUse = targetEmail || email
     if (!emailToUse.trim()) {
@@ -68,7 +78,7 @@ function LoginForm() {
     setErrorMsg(null)
 
     try {
-      const origin = window.location.origin
+      const origin = getSiteOrigin()
       const { error } = await supabase.auth.resend({
         type: 'signup',
         email: emailToUse.trim(),
@@ -98,7 +108,7 @@ function LoginForm() {
     setIsEmailUnconfirmed(false)
     setResendSuccess(false)
 
-    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    const origin = getSiteOrigin()
 
     if (mode === 'forgot_password') {
       if (!email.trim()) {
