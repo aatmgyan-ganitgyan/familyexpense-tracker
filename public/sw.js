@@ -1,22 +1,26 @@
-const CACHE_NAME = 'family-expense-tracker-v1';
-const ASSETS_TO_CACHE = [
-  '/',
+const CACHE_NAME = 'family-expense-tracker-v2';
+const STATIC_ASSETS = [
   '/manifest.json',
   '/icon.png',
-  '/icon-512.png'
+  '/icon-512.png',
+  '/file.svg',
+  '/globe.svg',
+  '/window.svg',
 ];
 
-// Install event - Cache core files
+// Install event - Cache static assets safely
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
+      return cache.addAll(STATIC_ASSETS).catch((err) => {
+        console.warn('Non-critical cache addAll failed:', err);
+      });
     })
   );
   self.skipWaiting();
 });
 
-// Activate event - Clean up old caches
+// Activate event - Clean up old caches and take control
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
@@ -32,47 +36,49 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch event - Serve from cache if offline
+// Fetch event
 self.addEventListener('fetch', (event) => {
-  // Only cache GET requests
+  // Only handle GET requests
   if (event.request.method !== 'GET') return;
 
-  // Avoid caching browser extensions or external APIs (like Supabase Auth/DB)
   const url = new URL(event.request.url);
+
+  // Never intercept cross-origin or external API requests (e.g. Supabase DB/Auth)
   if (url.origin !== self.location.origin) return;
 
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-      return fetch(event.request).then((response) => {
-        // Only cache successful requests
-        if (!response || response.status !== 200 || response.type !== 'basic') {
-          return response;
-        }
-        
-        // Don't cache dynamic pages (like scan, add, history) to keep them always fresh
-        if (
-          url.pathname === '/add' ||
-          url.pathname === '/scan' ||
-          url.pathname === '/history' ||
-          url.pathname === '/more/budget' ||
-          url.pathname === '/more/family'
-        ) {
-          return response;
-        }
+  // Never intercept document navigations or server actions / API routes
+  // Let Next.js server-side auth & middleware handle all page loads cleanly
+  if (
+    event.request.mode === 'navigate' ||
+    url.pathname.startsWith('/api') ||
+    url.pathname.startsWith('/auth')
+  ) {
+    return;
+  }
 
-        const responseToCache = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseToCache);
+  // Cache-first strategy for static assets only (images, icons, manifest)
+  if (
+    url.pathname.startsWith('/icon') ||
+    url.pathname.endsWith('.png') ||
+    url.pathname.endsWith('.svg') ||
+    url.pathname.endsWith('.ico') ||
+    url.pathname === '/manifest.json'
+  ) {
+    event.respondWith(
+      caches.match(event.request).then((cachedResponse) => {
+        if (cachedResponse) {
+          return cachedResponse;
+        }
+        return fetch(event.request).then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const responseClone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, responseClone);
+            });
+          }
+          return networkResponse;
         });
-
-        return response;
-      }).catch(() => {
-        // Offline fallback
-        return caches.match('/');
-      });
-    })
-  );
+      })
+    );
+  }
 });
