@@ -54,13 +54,16 @@ export default async function HistoryPage() {
   return (
     <div className="mx-auto max-w-md px-4 py-8">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Expense History</h1>
-      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">View and manage all family expenditures</p>
-      
+      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+        View and manage all family expenditures
+      </p>
+
       <div className="mt-6">
         <HistoryClient
           initialExpenses={(expenses || []) as any}
           members={members || []}
           categories={categories || []}
+          currentUserId={user.id}
           serverTodayStr={todayStr}
         />
       </div>

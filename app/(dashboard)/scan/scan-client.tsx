@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import * as Icons from 'lucide-react'
 import { saveExpense, editExpense, getMerchantDefaultCategory } from '@/app/actions/expenses'
-import { CategoryIcon } from '../add/add-expense-form'
+import { CategoryIcon, CategoryIconBox, getCategoryColor } from '@/lib/category-colors'
 import { getISTDateString, getISTTimeString } from '@/lib/date'
 
 interface Category {

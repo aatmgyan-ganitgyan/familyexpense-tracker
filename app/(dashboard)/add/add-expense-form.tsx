@@ -1,9 +1,18 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import * as Icons from 'lucide-react'
+import {
+  Loader2,
+  Lock,
+  AlertTriangle,
+  CheckCircle2,
+  Sparkles,
+} from 'lucide-react'
 import { getISTDateString, getISTTimeString } from '@/lib/date'
+import { CategoryIcon, CategoryIconBox, getCategoryColor } from '@/lib/category-colors'
+
+export { CategoryIcon } from '@/lib/category-colors'
 import {
   saveExpense,
   editExpense,
@@ -22,34 +31,39 @@ interface Category {
   icon: string
 }
 
+interface Merchant {
+  merchant_name: string
+  default_category_id: string | null
+}
+
 interface AddExpenseFormProps {
   currentUserProfileId: string
   members: Member[]
   categories: Category[]
-}
-
-// Helper component to dynamically render Lucide icons by string name
-export function CategoryIcon({ name, className }: { name: string; className?: string }) {
-  const IconComponent = (Icons as any)[name] || Icons.Coins
-  return <IconComponent className={className} />
+  merchants?: Merchant[]
+  recentCategoryIds?: string[]
 }
 
 export default function AddExpenseForm({
   currentUserProfileId,
   members,
   categories,
+  merchants = [],
+  recentCategoryIds = [],
 }: AddExpenseFormProps) {
   const router = useRouter()
 
   // Form State
   const [amount, setAmount] = useState('')
   const [paidBy, setPaidBy] = useState(currentUserProfileId)
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null)
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(
+    categories[0]?.id || null
+  )
   const [paymentMethod, setPaymentMethod] = useState<'UPI' | 'Cash' | 'Card' | 'Bank'>('UPI')
   const [merchant, setMerchant] = useState('')
   const [note, setNote] = useState('')
   const [isPrivate, setIsPrivate] = useState(false)
-  
+
   // UI States
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -59,16 +73,45 @@ export default function AddExpenseForm({
   const [showDuplicateModal, setShowDuplicateModal] = useState(false)
   const [duplicateMatches, setDuplicateMatches] = useState<any[]>([])
 
-  // On Merchant blur, look up historical category (Merchant Memory)
+  // Determine top 4-5 quick-select category chips
+  const quickCategories = useMemo(() => {
+    if (recentCategoryIds.length > 0) {
+      const matched = recentCategoryIds
+        .map((id) => categories.find((c) => c.id === id))
+        .filter(Boolean) as Category[]
+      if (matched.length >= 3) return matched.slice(0, 5)
+    }
+    // Fallback to top 5 categories
+    return categories.slice(0, 5)
+  }, [categories, recentCategoryIds])
+
+  // Merchant autocomplete selection handler
+  const handleMerchantChange = (value: string) => {
+    setMerchant(value)
+
+    const match = merchants.find(
+      (m) => m.merchant_name.toLowerCase() === value.trim().toLowerCase()
+    )
+    if (match && match.default_category_id) {
+      const cat = categories.find((c) => c.id === match.default_category_id)
+      if (cat) {
+        setSelectedCategoryId(cat.id)
+        setSuggestedMsg(`Auto-selected category "${cat.name}" for ${match.merchant_name}.`)
+        setTimeout(() => setSuggestedMsg(null), 3500)
+      }
+    }
+  }
+
+  // On Merchant blur, look up historical category (Merchant Memory from DB if not in static list)
   const handleMerchantBlur = async () => {
     if (!merchant.trim()) return
     try {
       const defaultCatId = await getMerchantDefaultCategory(merchant)
       if (defaultCatId && categories.some((c) => c.id === defaultCatId)) {
         setSelectedCategoryId(defaultCatId)
-        setSuggestedMsg(`Suggested category "${categories.find((c) => c.id === defaultCatId)?.name}" based on merchant history.`)
-        // Clear suggestion message after 4s
-        setTimeout(() => setSuggestedMsg(null), 4000)
+        const cat = categories.find((c) => c.id === defaultCatId)
+        setSuggestedMsg(`Suggested category "${cat?.name}" based on previous transactions.`)
+        setTimeout(() => setSuggestedMsg(null), 3500)
       }
     } catch (err) {
       console.error(err)
@@ -102,7 +145,6 @@ export default function AddExpenseForm({
         setShowDuplicateModal(true)
         setLoading(false)
       } else {
-        // Safe to save
         await executeSave()
       }
     } catch (err: any) {
@@ -142,21 +184,19 @@ export default function AddExpenseForm({
     }
   }
 
-  // Merge duplicate execution (update status of existing, discard new)
+  // Merge duplicate execution
   const executeMerge = async (matchId: string) => {
     setLoading(true)
     setShowDuplicateModal(false)
 
-    // Merging confirms the duplicate expense and appends our note
-    const matched = duplicateMatches.find((m) => m.id === matchId)
     const mergedNote = note.trim()
-      ? `Merged entry. original note, plus: ${note.trim()}`
+      ? `Merged entry. Original note, plus: ${note.trim()}`
       : 'Confirmed via duplicate detection merge.'
 
     const res = await editExpense(matchId, {
       status: 'confirmed',
       note: mergedNote,
-      categoryId: selectedCategoryId, // Update category if needed
+      categoryId: selectedCategoryId,
       userId: paidBy,
     })
 
@@ -172,48 +212,84 @@ export default function AddExpenseForm({
   return (
     <form onSubmit={handlePreSubmit} className="space-y-6">
       {errorMsg && (
-        <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-400">
+        <div className="rounded-2xl bg-red-50 p-4 text-xs font-semibold text-red-700 dark:bg-red-950/30 dark:text-red-400 border border-red-200 dark:border-red-900/50">
           {errorMsg}
         </div>
       )}
 
       {suggestedMsg && (
-        <div className="rounded-lg bg-indigo-50 p-3 text-xs text-indigo-700 dark:bg-indigo-950/30 dark:text-indigo-400">
-          {suggestedMsg}
+        <div className="flex items-center gap-2 rounded-2xl bg-indigo-50 p-3 text-xs font-semibold text-indigo-700 dark:bg-indigo-950/30 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/50 animate-in fade-in duration-200">
+          <Sparkles className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+          <span>{suggestedMsg}</span>
         </div>
       )}
 
       {/* Large Amount Input */}
-      <div className="flex flex-col items-center justify-center py-4 bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-xs">
-        <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Amount (INR)</span>
+      <div className="flex flex-col items-center justify-center py-5 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-xs">
+        <span className="text-xs font-bold uppercase tracking-wider text-gray-400">
+          Amount (INR)
+        </span>
         <div className="mt-2 flex items-center justify-center">
-          <span className="text-4xl font-extrabold text-gray-400 mr-1">₹</span>
+          <span className="text-4xl font-black text-rose-500 mr-1">₹</span>
           <input
             type="text"
             inputMode="decimal"
             required
+            autoFocus
             value={amount}
             onChange={(e) => {
-              const val = e.target.value;
+              const val = e.target.value
               if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                setAmount(val);
+                setAmount(val)
               }
             }}
             placeholder="0.00"
-            className="text-4xl font-extrabold text-gray-900 dark:text-white placeholder-gray-300 dark:placeholder-gray-700 focus:outline-none bg-transparent w-48 text-center"
+            className="text-4xl font-black text-gray-900 dark:text-white placeholder-gray-300 dark:placeholder-gray-700 focus:outline-none bg-transparent w-48 text-center"
           />
         </div>
       </div>
 
-      {/* Grid of details */}
+      {/* Quick-Select Category Chips */}
+      {quickCategories.length > 0 && (
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+            Quick Categories
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {quickCategories.map((cat) => {
+              const isSelected = selectedCategoryId === cat.id
+              const colors = getCategoryColor(cat.name)
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => setSelectedCategoryId(cat.id)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border ${
+                    isSelected
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs scale-105'
+                      : `${colors.bg} ${colors.text} ${colors.border} hover:opacity-80`
+                  }`}
+                >
+                  <CategoryIcon name={cat.icon} className="h-3.5 w-3.5" />
+                  <span>{cat.name}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Form Details */}
       <div className="space-y-4">
         {/* Paid By Selection */}
         <div className="flex flex-col space-y-1">
-          <label className="text-xs font-bold text-gray-500 uppercase">Paid By</label>
+          <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+            Paid By
+          </label>
           <select
             value={paidBy}
             onChange={(e) => setPaidBy(e.target.value)}
-            className="block w-full rounded-lg border border-gray-300 bg-white py-3 px-4 text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-white sm:text-sm"
+            className="block w-full rounded-2xl border border-gray-200 bg-white py-3 px-4 text-sm font-semibold text-gray-900 focus:border-indigo-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white"
           >
             {members.map((member) => (
               <option key={member.id} value={member.id}>
@@ -225,17 +301,19 @@ export default function AddExpenseForm({
 
         {/* Payment Method Selector */}
         <div className="flex flex-col space-y-1">
-          <label className="text-xs font-bold text-gray-500 uppercase">Payment Method</label>
+          <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+            Payment Method
+          </label>
           <div className="grid grid-cols-4 gap-2">
             {(['UPI', 'Cash', 'Card', 'Bank'] as const).map((method) => (
               <button
                 key={method}
                 type="button"
                 onClick={() => setPaymentMethod(method)}
-                className={`py-2.5 text-center text-xs font-semibold rounded-lg border transition ${
+                className={`py-2.5 text-center text-xs font-bold rounded-xl border transition ${
                   paymentMethod === method
                     ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs'
-                    : 'bg-white border-gray-200 text-gray-700 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-300'
+                    : 'bg-white border-gray-200 text-gray-700 dark:bg-gray-900 dark:border-gray-800 dark:text-gray-300'
                 }`}
               >
                 {method}
@@ -244,50 +322,90 @@ export default function AddExpenseForm({
           </div>
         </div>
 
-        {/* Merchant & Note Inputs */}
-        <div className="grid grid-cols-2 gap-4">
+        {/* Merchant with Autocomplete & Note Inputs */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="flex flex-col space-y-1">
-            <label className="text-xs font-bold text-gray-500 uppercase">Merchant</label>
+            <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+              Merchant / Payee
+            </label>
             <input
               type="text"
+              list="merchants-datalist"
               value={merchant}
-              onChange={(e) => setMerchant(e.target.value)}
+              onChange={(e) => handleMerchantChange(e.target.value)}
               onBlur={handleMerchantBlur}
-              placeholder="e.g. Swiggy, Zomato"
-              className="block w-full rounded-lg border border-gray-300 py-2.5 px-3.5 text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"
+              placeholder="e.g. Swiggy, DMart, Uber"
+              className="block w-full rounded-2xl border border-gray-200 bg-white py-3 px-4 text-sm text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white"
             />
+            {/* Native datalist for instant autocomplete suggestions */}
+            <datalist id="merchants-datalist">
+              {merchants.map((m) => (
+                <option key={m.merchant_name} value={m.merchant_name} />
+              ))}
+            </datalist>
           </div>
+
           <div className="flex flex-col space-y-1">
-            <label className="text-xs font-bold text-gray-500 uppercase">Note (Optional)</label>
+            <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+              Note (Optional)
+            </label>
             <input
               type="text"
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="e.g. Lunch with team"
-              className="block w-full rounded-lg border border-gray-300 py-2.5 px-3.5 text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"
+              placeholder="e.g. Dinner with family"
+              className="block w-full rounded-2xl border border-gray-200 bg-white py-3 px-4 text-sm text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white"
             />
           </div>
         </div>
 
-        {/* Categories Grid */}
-        <div className="flex flex-col space-y-1.5">
-          <label className="text-xs font-bold text-gray-500 uppercase">Category</label>
-          <div className="grid grid-cols-3 gap-2 max-h-60 overflow-y-auto p-1 border border-gray-100 dark:border-gray-850 rounded-xl bg-gray-50/50 dark:bg-gray-900/30">
+        {/* Category Grid (2 columns, no inner scroll, full page scroll) */}
+        <div className="flex flex-col space-y-2 pt-2">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+              Select Category
+            </label>
+            <span className="text-[10px] text-gray-400 font-medium">
+              {categories.length} options
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5">
             {categories.map((category) => {
               const isSelected = selectedCategoryId === category.id
+              const colors = getCategoryColor(category.name)
+
               return (
                 <button
                   key={category.id}
                   type="button"
                   onClick={() => setSelectedCategoryId(category.id)}
-                  className={`flex flex-col items-center justify-center p-3 rounded-lg border text-center transition ${
+                  className={`flex items-center space-x-3 p-3.5 rounded-2xl border text-left transition relative ${
                     isSelected
-                      ? 'bg-indigo-50 border-indigo-500 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-400'
-                      : 'bg-white border-gray-200 text-gray-600 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400 hover:bg-gray-50'
+                      ? 'border-indigo-600 bg-indigo-50/70 dark:bg-indigo-950/40 ring-2 ring-indigo-500 shadow-xs'
+                      : 'bg-white border-gray-150 hover:border-gray-300 dark:bg-gray-900 dark:border-gray-800 dark:hover:border-gray-700'
                   }`}
                 >
-                  <CategoryIcon name={category.icon} className="h-5 w-5 mb-1" />
-                  <span className="text-[10px] font-semibold truncate w-full">{category.name}</span>
+                  <CategoryIconBox
+                    categoryName={category.name}
+                    iconName={category.icon}
+                    size="md"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className={`text-xs font-bold truncate ${
+                        isSelected
+                          ? 'text-indigo-950 dark:text-indigo-200'
+                          : 'text-gray-900 dark:text-white'
+                      }`}
+                    >
+                      {category.name}
+                    </p>
+                  </div>
+
+                  {isSelected && (
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                  )}
                 </button>
               )
             })}
@@ -295,57 +413,83 @@ export default function AddExpenseForm({
         </div>
       </div>
 
-      {/* Private Expense Toggle */}
-      <div className="flex items-center justify-between p-3.5 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl shadow-xs">
-        <div className="flex items-center space-x-2">
-          <Icons.Lock className="h-4.5 w-4.5 text-gray-400" />
-          <div className="text-left">
-            <p className="text-xs font-bold text-gray-700 dark:text-gray-300">Private Expense</p>
-            <p className="text-[9px] text-gray-400 dark:text-gray-400">Only visible to you (hidden from family aggregates)</p>
+      {/* Modern Private Expense Toggle Switch */}
+      <div className="flex items-center justify-between p-4 bg-white dark:bg-gray-900 border border-gray-150 dark:border-gray-800 rounded-2xl shadow-xs">
+        <div className="flex items-center space-x-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+            <Lock className="h-4.5 w-4.5" />
+          </div>
+          <div>
+            <p className="text-xs font-bold text-gray-900 dark:text-white">
+              Private Expense
+            </p>
+            <p className="text-[10px] text-gray-400">
+              Only visible to you (hidden from family aggregates)
+            </p>
           </div>
         </div>
-        <input
-          type="checkbox"
-          checked={isPrivate}
-          onChange={(e) => setIsPrivate(e.target.checked)}
-          className="h-4.5 w-4.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-800"
-        />
+
+        {/* Large smooth toggle button */}
+        <button
+          type="button"
+          role="switch"
+          aria-checked={isPrivate}
+          onClick={() => setIsPrivate(!isPrivate)}
+          className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+            isPrivate ? 'bg-indigo-600' : 'bg-gray-200 dark:bg-gray-700'
+          }`}
+        >
+          <span
+            className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+              isPrivate ? 'translate-x-5' : 'translate-x-0'
+            }`}
+          />
+        </button>
       </div>
 
+      {/* Save Button */}
       <button
         type="submit"
         disabled={loading}
-        className="w-full flex justify-center items-center rounded-xl bg-indigo-600 py-3.5 px-4 font-bold text-white shadow-md hover:bg-indigo-700 focus:ring-2 focus:ring-indigo-500 focus:outline-none disabled:opacity-50"
+        className="w-full flex justify-center items-center rounded-2xl bg-indigo-600 py-4 px-4 font-bold text-white shadow-md hover:bg-indigo-700 focus:ring-2 focus:ring-indigo-500 focus:outline-none disabled:opacity-50 transition"
       >
-        {loading ? (
-          <Icons.Loader2 className="h-5 w-5 animate-spin" />
-        ) : (
-          'Save Expense'
-        )}
+        {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Save Expense'}
       </button>
 
       {/* Duplicate Dialog Modal */}
       {showDuplicateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl dark:bg-gray-900 animate-in fade-in zoom-in-95 duration-150">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl dark:bg-gray-900">
             <div className="flex flex-col items-center text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400">
-                <Icons.AlertTriangle className="h-6 w-6" />
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400">
+                <AlertTriangle className="h-6 w-6" />
               </div>
-              <h3 className="mt-4 text-lg font-bold text-gray-900 dark:text-white">Duplicate Detected!</h3>
-              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                An expense with amount <strong>₹{amount}</strong> for <strong>{merchant || 'No Merchant'}</strong> has already been entered today.
+              <h3 className="mt-4 text-base font-bold text-gray-900 dark:text-white">
+                Duplicate Detected!
+              </h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                An expense with amount <strong>₹{amount}</strong> for{' '}
+                <strong>{merchant || 'No Merchant'}</strong> has already been entered today.
               </p>
             </div>
 
             {/* List matches */}
-            <div className="mt-4 max-h-32 overflow-y-auto space-y-2 border border-gray-100 dark:border-gray-800 p-2 rounded-lg bg-gray-50/50 dark:bg-gray-800/30">
+            <div className="mt-4 max-h-32 overflow-y-auto space-y-2 border border-gray-100 dark:border-gray-800 p-2.5 rounded-2xl bg-gray-50/50 dark:bg-gray-800/30">
               {duplicateMatches.map((m) => (
-                <div key={m.id} className="flex justify-between items-center text-[10px] font-medium text-gray-600 dark:text-gray-400">
-                  <span>{m.merchant || 'Merchant'} (₹{m.amount})</span>
-                  <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-bold ${
-                    m.status === 'confirmed' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
-                  }`}>
+                <div
+                  key={m.id}
+                  className="flex justify-between items-center text-[11px] font-medium text-gray-600 dark:text-gray-400"
+                >
+                  <span>
+                    {m.merchant || 'Merchant'} (₹{m.amount})
+                  </span>
+                  <span
+                    className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold ${
+                      m.status === 'confirmed'
+                        ? 'bg-green-100 text-green-700'
+                        : 'bg-amber-100 text-amber-700'
+                    }`}
+                  >
                     {m.status}
                   </span>
                 </div>
@@ -357,25 +501,25 @@ export default function AddExpenseForm({
                 type="button"
                 onClick={() => {
                   setShowDuplicateModal(false)
-                  executeSave() // Save new anyways
+                  executeSave()
                 }}
-                className="w-full rounded-xl bg-indigo-600 py-3 text-xs font-bold text-white hover:bg-indigo-700"
+                className="w-full rounded-2xl bg-indigo-600 py-3 text-xs font-bold text-white hover:bg-indigo-700"
               >
                 Keep Both (Save New)
               </button>
-              
+
               <button
                 type="button"
                 onClick={() => executeMerge(duplicateMatches[0].id)}
-                className="w-full rounded-xl border border-gray-300 bg-white py-3 text-xs font-bold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                className="w-full rounded-2xl border border-gray-200 bg-white py-3 text-xs font-bold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
               >
-                Merge (Confirm & Update Existing)
+                Merge (Update Existing)
               </button>
 
               <button
                 type="button"
                 onClick={() => setShowDuplicateModal(false)}
-                className="w-full rounded-xl border border-gray-300 bg-white py-3 text-xs font-bold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                className="w-full rounded-2xl border border-gray-200 bg-white py-3 text-xs font-bold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
               >
                 Cancel
               </button>

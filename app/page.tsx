@@ -25,7 +25,13 @@ export default async function HomePage() {
     redirect('/onboarding')
   }
 
-  // 3. Fetch all non-deleted expenses for this family
+  // 3. Check family member count to decide whether to show invite banner
+  const { count: memberCount } = await supabase
+    .from('profiles')
+    .select('id', { count: 'exact', head: true })
+    .eq('family_id', profile.family_id)
+
+  // 4. Fetch all non-deleted expenses for this family
   const { data: expenses } = await supabase
     .from('expenses')
     .select('*, categories(name, icon), profiles:profiles!expenses_user_id_fkey(name)')
@@ -43,6 +49,7 @@ export default async function HomePage() {
       userName={profile.name}
       familyName={familyName}
       inviteCode={inviteCode}
+      memberCount={memberCount ?? 1}
       initialExpenses={(expenses || []) as any}
       serverTodayStr={todayStr}
     />

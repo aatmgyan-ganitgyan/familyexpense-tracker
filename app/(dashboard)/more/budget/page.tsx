@@ -28,14 +28,21 @@ export default async function BudgetPage() {
   // 3. Fetch budgets
   const { data: budgets } = await supabase
     .from('budgets')
-    .select('*')
+    .select('id, amount, user_id, category_id, period')
     .eq('family_id', profile.family_id)
     .eq('period', 'monthly')
 
-  const familyBudget = budgets?.find((b) => b.user_id === null)?.amount || 0
-  const personalBudget = budgets?.find((b) => b.user_id === user.id)?.amount || 0
+  const familyBudget = budgets?.find((b) => !b.user_id && !b.category_id)?.amount || 0
+  const personalBudget = budgets?.find((b) => b.user_id === user.id && !b.category_id)?.amount || 0
 
-  // 4. Calculate current month's spending
+  // 4. Fetch categories
+  const { data: categories } = await supabase
+    .from('categories')
+    .select('id, name, icon')
+    .or(`family_id.is.null,family_id.eq.${profile.family_id}`)
+    .order('name', { ascending: true })
+
+  // 5. Calculate current month's spending
   const now = new Date()
   const year = now.getFullYear()
   const month = String(now.getMonth() + 1).padStart(2, '0')
@@ -46,7 +53,7 @@ export default async function BudgetPage() {
 
   const { data: monthExpenses } = await supabase
     .from('expenses')
-    .select('amount, user_id')
+    .select('amount, user_id, category_id')
     .eq('family_id', profile.family_id)
     .is('deleted_at', null)
     .gte('expense_date', startOfMonth)
@@ -57,6 +64,21 @@ export default async function BudgetPage() {
     ?.filter((exp) => exp.user_id === user.id)
     .reduce((sum, exp) => sum + Number(exp.amount), 0) || 0
 
+  // Category spent map
+  const categorySpentMap: Record<string, number> = {}
+  monthExpenses?.forEach((exp) => {
+    if (exp.category_id) {
+      categorySpentMap[exp.category_id] = (categorySpentMap[exp.category_id] || 0) + Number(exp.amount)
+    }
+  })
+
+  // Category budgets list
+  const categoryBudgets = (budgets?.filter((b) => b.category_id) || []).map((b) => ({
+    id: b.id,
+    categoryId: b.category_id!,
+    amount: Number(b.amount),
+  }))
+
   return (
     <div className="mx-auto max-w-md px-4 py-8">
       <BudgetClient
@@ -65,6 +87,9 @@ export default async function BudgetPage() {
         initialPersonalBudget={Number(personalBudget)}
         familySpent={familySpent}
         personalSpent={personalSpent}
+        categories={categories || []}
+        initialCategoryBudgets={categoryBudgets}
+        categorySpentMap={categorySpentMap}
       />
     </div>
   )

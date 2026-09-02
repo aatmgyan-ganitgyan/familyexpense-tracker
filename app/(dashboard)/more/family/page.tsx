@@ -17,7 +17,7 @@ export default async function FamilySettingsPage() {
   // 2. Fetch user profile
   const { data: profile } = await supabase
     .from('profiles')
-    .select('family_id')
+    .select('family_id, role')
     .eq('id', user.id)
     .single()
 
@@ -39,12 +39,16 @@ export default async function FamilySettingsPage() {
     .eq('family_id', profile.family_id)
     .order('created_at', { ascending: true })
 
+  const isAdmin = profile.role === 'admin'
+
   return (
     <div className="mx-auto max-w-md px-4 py-8">
       <FamilyClient
         familyName={family?.name || 'Family Workspace'}
         inviteCode={family?.invite_code || ''}
         members={(members || []) as any}
+        isAdmin={isAdmin}
+        currentUserId={user.id}
       />
     </div>
   )
