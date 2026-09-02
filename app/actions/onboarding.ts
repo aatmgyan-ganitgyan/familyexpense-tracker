@@ -32,6 +32,12 @@ export async function createFamily(familyName: string) {
     return { error: 'Not authenticated' }
   }
 
+  console.log('DEBUG createFamily auth:', {
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+  })
+
   if (!familyName.trim()) {
     return { error: 'Family name is required' }
   }
@@ -62,6 +68,9 @@ export async function createFamily(familyName: string) {
   }
 
   // 3. Create the family
+  const { data: { session } } = await supabase.auth.getSession()
+  console.log('DEBUG session present:', !!session, session?.user?.role)
+
   const { data: familyData, error: familyError } = await supabase
     .from('families')
     .insert({
