@@ -67,11 +67,8 @@ export async function createFamily(familyName: string) {
     return { error: 'Failed to generate a unique invite code. Please try again.' }
   }
 
-  // 3. Create the family
-  const { data: { session } } = await supabase.auth.getSession()
-  console.log('DEBUG session present:', !!session, session?.user?.role)
-
-  const { data: familyData, error: familyError } = await supabase
+  // 3. Create the family using admin client (bypasses RLS timing on new family creation)
+  const { data: familyData, error: familyError } = await adminDb
     .from('families')
     .insert({
       name: familyName,
@@ -87,7 +84,7 @@ export async function createFamily(familyName: string) {
 
   // 4. Update or create user profile to link to the new family and make them admin
   const fallbackName = user.email ? user.email.split('@')[0] : 'Member'
-  const { error: profileError } = await supabase
+  const { error: profileError } = await adminDb
     .from('profiles')
     .upsert({
       id: user.id,
@@ -139,7 +136,7 @@ export async function joinFamily(inviteCode: string) {
 
   // 3. Update or create user profile to link to this family as member
   const fallbackName = user.email ? user.email.split('@')[0] : 'Member'
-  const { error: profileError } = await supabase
+  const { error: profileError } = await adminDb
     .from('profiles')
     .upsert({
       id: user.id,
