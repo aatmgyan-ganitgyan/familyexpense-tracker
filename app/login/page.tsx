@@ -36,6 +36,9 @@ function LoginForm() {
 
   const getFriendlyErrorMessage = (rawError: string): string => {
     const lower = rawError.toLowerCase()
+    if (lower.includes('pkce') || lower.includes('code verifier') || lower.includes('code_verifier')) {
+      return 'The confirmation link was opened in a different browser, app, or has expired. If you have already confirmed, please sign in below or request a fresh link.'
+    }
     if (lower.includes('invalid login credentials') || lower.includes('invalid_grant')) {
       return 'Invalid email or password. Please check your credentials and try again.'
     }
