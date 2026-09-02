@@ -30,11 +30,13 @@ export default function ScanClient({ currentUserProfileId, categories }: ScanCli
   const [scanError, setScanError] = useState<string | null>(null)
 
   // QR Parsed details
+  const [rawQrText, setRawQrText] = useState('')
   const [upiLink, setUpiLink] = useState('')
   const [merchant, setMerchant] = useState('')
   const [upiId, setUpiId] = useState('')
   const [amount, setAmount] = useState('')
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(categories[0]?.id || null)
+  const [copiedUpi, setCopiedUpi] = useState(false)
 
   // App States
   const [loading, setLoading] = useState(false)
@@ -144,6 +146,7 @@ export default function ScanClient({ currentUserProfileId, categories }: ScanCli
   // Parse UPI link parameters
   const handleQrDecoded = async (text: string) => {
     setScanError(null)
+    setRawQrText(text)
 
     // Example UPI URI: upi://pay?pa=merchant@upi&pn=MerchantName&am=100&cu=INR
     if (!text.startsWith('upi://pay')) {
@@ -179,9 +182,74 @@ export default function ScanClient({ currentUserProfileId, categories }: ScanCli
     }
   }
 
+  // Build UPI URI with all preserved parameters
+  const getFullUpiUri = (scheme = 'upi://pay') => {
+    try {
+      if (rawQrText.startsWith('upi://pay')) {
+        const url = new URL(rawQrText.replace('upi://pay', 'https://placeholder.com'))
+        if (amount) url.searchParams.set('am', amount)
+        if (merchant) url.searchParams.set('pn', merchant)
+        if (upiId) url.searchParams.set('pa', upiId)
+        url.searchParams.set('cu', 'INR')
+        return url.toString().replace('https://placeholder.com', scheme)
+      }
+    } catch (e) {
+      // fallback to manual build
+    }
+    return `${scheme}?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(merchant)}&am=${encodeURIComponent(amount)}&cu=INR`
+  }
+
+  const handleCopyUpi = () => {
+    if (!upiId) return
+    navigator.clipboard.writeText(upiId)
+    setCopiedUpi(true)
+    setTimeout(() => setCopiedUpi(false), 2000)
+  }
+
+  // Save directly as confirmed without launching deep link
+  const handleSaveDirectly = async () => {
+    setErrorMsg(null)
+    const numAmount = parseFloat(amount)
+    if (isNaN(numAmount) || numAmount <= 0) {
+      setErrorMsg('Please enter a valid payment amount.')
+      return
+    }
+    if (!selectedCategoryId) {
+      setErrorMsg('Please select a category.')
+      return
+    }
+
+    setLoading(true)
+    const now = new Date()
+    const dateStr = getISTDateString(now)
+    const timeStr = getISTTimeString(now)
+
+    const input = {
+      amount: numAmount,
+      userId: currentUserProfileId,
+      categoryId: selectedCategoryId,
+      merchant: merchant || 'UPI Payment',
+      upiId,
+      paymentMethod: 'UPI' as const,
+      expenseDate: dateStr,
+      expenseTime: timeStr,
+      note: 'Recorded via QR scanner.',
+      source: 'upi_qr' as const,
+      status: 'confirmed' as const,
+    }
+
+    const res = await saveExpense(input)
+    if (res.error) {
+      setErrorMsg(res.error)
+      setLoading(false)
+    } else {
+      router.push('/')
+      router.refresh()
+    }
+  }
+
   // Initiate payment: Save pending transaction and open UPI app link
-  const handleInitiatePayment = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleInitiatePayment = async (targetScheme = 'upi://pay') => {
     setErrorMsg(null)
 
     const numAmount = parseFloat(amount)
@@ -206,7 +274,7 @@ export default function ScanClient({ currentUserProfileId, categories }: ScanCli
       amount: numAmount,
       userId: currentUserProfileId,
       categoryId: selectedCategoryId,
-      merchant,
+      merchant: merchant || 'UPI Payment',
       upiId,
       paymentMethod: 'UPI' as const,
       expenseDate: dateStr,
@@ -224,11 +292,9 @@ export default function ScanClient({ currentUserProfileId, categories }: ScanCli
       setPendingId(res.id)
       setLoading(false)
 
-      // Construct upi deep link (with updated amount if edited)
-      const updatedUpiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(merchant)}&am=${amount}&cu=INR`
-
+      const targetUri = getFullUpiUri(targetScheme)
       // Open the deep link to load UPI app
-      window.location.href = updatedUpiLink
+      window.location.href = targetUri
 
       // Shift screen to verification questionnaire
       setScanState('verifying')
@@ -258,6 +324,15 @@ export default function ScanClient({ currentUserProfileId, categories }: ScanCli
       router.refresh()
     }
   }
+
+  const isPersonalUpi =
+    upiId.endsWith('@oksbi') ||
+    upiId.endsWith('@okhdfcbank') ||
+    upiId.endsWith('@okaxis') ||
+    upiId.endsWith('@okicici') ||
+    upiId.endsWith('@ibl') ||
+    upiId.endsWith('@axl') ||
+    upiId.endsWith('@ybl')
 
   return (
     <div className="space-y-6">
@@ -335,15 +410,12 @@ export default function ScanClient({ currentUserProfileId, categories }: ScanCli
 
       {/* STEP 2: CONFIRMATION BEFORE PAYMENT VIEW */}
       {scanState === 'confirming' && (
-        <form
-          onSubmit={handleInitiatePayment}
-          className="space-y-4 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 p-6 rounded-3xl shadow-xs animate-in fade-in zoom-in-95 duration-200"
-        >
+        <div className="space-y-4 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 p-6 rounded-3xl shadow-xs animate-in fade-in zoom-in-95 duration-200">
           <div className="text-center pb-4 border-b border-gray-100 dark:border-gray-800">
             <h2 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">
               Confirm Payment Details
             </h2>
-            <p className="text-xs text-gray-400 mt-1">Review before launching UPI app</p>
+            <p className="text-xs text-gray-400 mt-1">Review details before paying</p>
           </div>
 
           {/* Amount */}
@@ -373,7 +445,7 @@ export default function ScanClient({ currentUserProfileId, categories }: ScanCli
           {/* Merchant Name */}
           <div className="flex flex-col space-y-1">
             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-              Merchant / Shop
+              Payee / Shop Name
             </label>
             <input
               type="text"
@@ -385,22 +457,46 @@ export default function ScanClient({ currentUserProfileId, categories }: ScanCli
             />
           </div>
 
-          {/* Payee UPI ID (Read Only) */}
+          {/* Payee UPI ID */}
           <div className="flex flex-col space-y-1 text-xs">
             <span className="font-bold text-[10px] text-gray-400 uppercase tracking-wider">
               UPI ID
             </span>
-            <span className="py-2.5 px-3.5 bg-gray-50 dark:bg-gray-800 border border-gray-150 dark:border-gray-700 rounded-2xl text-gray-500 truncate dark:text-gray-400 font-mono text-[11px]">
-              {upiId || 'N/A'}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="flex-1 py-2.5 px-3.5 bg-gray-50 dark:bg-gray-800 border border-gray-150 dark:border-gray-700 rounded-2xl text-gray-600 truncate dark:text-gray-300 font-mono text-[11px]">
+                {upiId || 'N/A'}
+              </span>
+              <button
+                type="button"
+                onClick={handleCopyUpi}
+                className="flex h-10 w-10 items-center justify-center rounded-2xl border border-gray-200 bg-white hover:bg-gray-50 text-gray-500 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-300 shrink-0"
+                title="Copy UPI ID"
+              >
+                {copiedUpi ? (
+                  <Icons.Check className="h-4 w-4 text-emerald-500" />
+                ) : (
+                  <Icons.Copy className="h-4 w-4" />
+                )}
+              </button>
+            </div>
           </div>
+
+          {/* Helpful P2P transfer notice */}
+          {isPersonalUpi && (
+            <div className="rounded-2xl bg-blue-50/70 p-3 text-[11px] text-blue-700 dark:bg-blue-950/30 dark:text-blue-300 border border-blue-200/60 flex items-start gap-2">
+              <Icons.Info className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>
+                Personal UPI ID detected. If direct app launch shows an NPCI warning, you can copy the UPI ID above or tap <strong>"Save & Mark Paid"</strong> directly.
+              </span>
+            </div>
+          )}
 
           {/* Category Select grid with Phase 0 colors */}
           <div className="flex flex-col space-y-1.5 pt-1">
             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
               Category
             </label>
-            <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-1">
+            <div className="grid grid-cols-2 gap-2 max-h-44 overflow-y-auto p-1">
               {categories.map((category) => {
                 const isSelected = selectedCategoryId === category.id
                 const colors = getCategoryColor(category.name)
@@ -431,30 +527,44 @@ export default function ScanClient({ currentUserProfileId, categories }: ScanCli
             </div>
           </div>
 
-          <div className="flex space-x-2.5 pt-3">
+          {/* Action Buttons */}
+          <div className="space-y-2 pt-3">
             <button
               type="button"
-              onClick={() => setScanState('scanning')}
-              className="w-1/2 rounded-2xl border border-gray-200 py-3 text-xs font-bold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
-            >
-              Scan Again
-            </button>
-            <button
-              type="submit"
+              onClick={() => handleInitiatePayment('upi://pay')}
               disabled={loading}
-              className="w-1/2 flex items-center justify-center rounded-2xl bg-indigo-600 py-3 text-xs font-bold text-white hover:bg-indigo-700 shadow-xs disabled:opacity-50"
+              className="w-full flex items-center justify-center rounded-2xl bg-indigo-600 py-3.5 text-xs font-bold text-white hover:bg-indigo-700 shadow-xs disabled:opacity-50 transition"
             >
               {loading ? (
                 <Icons.Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <>
-                  <Icons.Zap className="h-3.5 w-3.5 mr-1" />
-                  <span>Pay & Track</span>
+                  <Icons.Zap className="h-4 w-4 mr-1.5" />
+                  <span>Pay with UPI App & Track</span>
                 </>
               )}
             </button>
+
+            {/* Direct Save Option */}
+            <button
+              type="button"
+              onClick={handleSaveDirectly}
+              disabled={loading}
+              className="w-full flex items-center justify-center rounded-2xl bg-emerald-600 py-3 text-xs font-bold text-white hover:bg-emerald-700 shadow-xs disabled:opacity-50 transition"
+            >
+              <Icons.CheckCircle2 className="h-4 w-4 mr-1.5" />
+              <span>Already Paid? Save & Mark Confirmed</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setScanState('scanning')}
+              className="w-full rounded-2xl border border-gray-200 bg-white py-2.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+            >
+              Scan Another QR
+            </button>
           </div>
-        </form>
+        </div>
       )}
 
       {/* STEP 3: POST-PAYMENT VERIFICATION QUESTIONNAIRE */}
@@ -465,10 +575,10 @@ export default function ScanClient({ currentUserProfileId, categories }: ScanCli
           </div>
           <div>
             <h2 className="text-base font-bold text-gray-900 dark:text-white">
-              Did you pay successfully?
+              Did you complete the payment?
             </h2>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-              We launched your UPI payment app to pay{' '}
+              We launched your UPI app to pay{' '}
               <strong className="text-rose-600 dark:text-rose-400 font-bold">₹{amount}</strong> to{' '}
               <strong>{merchant}</strong>.
             </p>
